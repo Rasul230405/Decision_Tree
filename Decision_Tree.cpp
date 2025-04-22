@@ -5,6 +5,7 @@
 #include <queue>
 #include <climits>
 #include <algorithm>
+#include <fstream>
 
 class DataPoint{
 public:
@@ -132,7 +133,8 @@ private:
   double min_impurity_decrease = 0.05;
   double min_impurity = 0.01;
   
-  void set_n_classes(std::vector<int>& labels);
+  void set_n_classes(std::vector<int>& labels); // calculates the number of classes in data
+  
   void build_tree(std::vector<DataPoint>& data);
   double calculate_entropy(std::vector<DataPoint>& data);
   std::pair<std::pair<std::vector<DataPoint>, std::vector<DataPoint>>, std::pair<int, double>> split(std::vector<DataPoint>&);
@@ -198,6 +200,7 @@ std::pair<int, double> DecisionTree::find_best_split(std::vector<DataPoint>& dat
     // overall entropy is the weighted sum of entropies
     double current_entropy = ((static_cast<double>(current_left.size()) / size) * calculate_entropy(current_left) + (static_cast<double>(current_right.size()) / size) * calculate_entropy(current_right));
 
+    // update best_entropy if necessary
     if (current_entropy < best_entropy) {
       best_entropy = current_entropy;
       best_split_index = i;
@@ -207,6 +210,7 @@ std::pair<int, double> DecisionTree::find_best_split(std::vector<DataPoint>& dat
   }
 
   //std::cout << "entropy: " << best_entropy << '\n';
+  
   return std::make_pair(best_split_index, best_entropy);
   
 }
@@ -219,7 +223,8 @@ std::pair<std::pair<std::vector<DataPoint>, std::vector<DataPoint>>, std::pair<i
   std::vector<DataPoint> right;
 
   auto [best_split_index, best_entropy] = find_best_split(data);
-  if (best_split_index == -1) { std::cout << "couldnt find best spit\n";}
+  
+  if (best_split_index == -1) { std::cout << "couldnt find best split\n";}
 
   for (DataPoint& dp : data) {
     if (dp.features[best_split_index] == 1)
@@ -238,7 +243,7 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
   // prioritised by greater information gain values
   std::priority_queue<LeafNode*, std::vector<LeafNode*>, CompareLeaf> pq;
 
-  std::unordered_map<Node*, std::pair<RuleNode*, bool>> nodeToParent; // bool = true for left child
+  std::unordered_map<Node*, std::pair<RuleNode*, bool>> node_to_parent; // bool = true for left child
 
   double entrp = this->calculate_entropy(data);
   this->root = new LeafNode(data, entrp, this->n_classes);
@@ -248,8 +253,8 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
   while (!pq.empty() && pq.size() < max_leaf_nodes) {
     LeafNode *current_leaf = pq.top();
     pq.pop();
-    //std::cout << "parent->entropy(): " << current_leaf->get_entropy() << std::endl;
 
+    // check criterions
     if (current_leaf->get_n_samples() < min_samples_split || current_leaf->get_entropy() <= min_impurity)
       continue;
 
@@ -262,6 +267,7 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
     int split_feature = split.first;
     double split_entropy = split.second;
 
+    // check criterions
     if (current_leaf->get_entropy() - split_entropy < min_impurity_decrease)
       continue;
     
@@ -282,20 +288,21 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
     left->set_info_gain((current_entrp - left_entrp));
     right->set_info_gain((current_entrp - right_entrp));
 
+    // convert the current leaf node to rule node
     RuleNode *rule_node = to_RuleNode(current_leaf, split_feature);
     rule_node->left = left;
     rule_node->right = right;
 
     // Track parent relationship for new nodes
-    nodeToParent[left] = {rule_node, true};   // left child
-    nodeToParent[right] = {rule_node, false}; // right child
+    node_to_parent[left] = {rule_node, true};   // left child
+    node_to_parent[right] = {rule_node, false}; // right child
     
     // Replace the current_leaf with rule_node in the tree
     if (this->root == current_leaf) {
       this->root = rule_node; 
     } else {
       // Find the parent and update the appropriate pointer
-      auto parent_info = nodeToParent[current_leaf];
+      auto parent_info = node_to_parent[current_leaf];
       RuleNode* parent = parent_info.first;
       bool is_left_child = parent_info.second;
       
@@ -306,11 +313,11 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
       }
     }
     
-    auto parent_it = nodeToParent.find(current_leaf);
-    if (parent_it != nodeToParent.end()) {
+    auto parent_it = node_to_parent.find(current_leaf);
+    if (parent_it != node_to_parent.end()) {
       auto parent_info = parent_it->second;  //sSave the parent info
-      nodeToParent.erase(parent_it);  // erase the old entry
-      nodeToParent[rule_node] = parent_info;  // Add the new relationship
+      node_to_parent.erase(parent_it);  // erase the old entry
+      node_to_parent[rule_node] = parent_info;  // add the new relationship
     }
     
     // Now it's safe to delete the old leaf
@@ -336,14 +343,15 @@ std::vector<int> DecisionTree::predict(std::vector<std::vector<int>>& datapoints
   unsigned i = 0;
   for (std::vector<int>& dp : datapoints) {
     Node *root = this->root;
-    
+
+    // unless leaf node traverse tree according to rules
     while (!(root->is_leaf())) {
       int split_f = dynamic_cast<RuleNode*>(root)->split_feature;
 
       if (dp[split_f] == 1) // go left
 	root = dynamic_cast<RuleNode*>(root)->left;
 
-      else if (dp[split_f] == 0)
+      else if (dp[split_f] == 0) // go right
 	root = dynamic_cast<RuleNode*>(root)->right;
     }
 
@@ -352,4 +360,83 @@ std::vector<int> DecisionTree::predict(std::vector<std::vector<int>>& datapoints
 
   return predictions;
   
+}
+
+int main()
+{
+    std::fstream training_file ("training.dat", std::ios::in);
+    std::vector<std::vector<int>> X;
+    std::vector<int> Y;
+    
+    // read data from training.dat
+    while (!training_file.eof()) {
+          std::string line;
+          std::vector<int> row;
+          int count = 0;
+
+	  std::getline(training_file, line);
+	  
+          for (int i = 0; i < line.size(); i++) {
+            if (count == 10 && (line[i] == '1' || line[i] == '0' || line[i] == '2')) Y.push_back(line[i] - '0');
+
+            else {
+                if (line[i] == '1') { row.push_back(1); count++; }
+                else if (line[i] == '0') { row.push_back(0); count++; }
+            }
+          }
+
+          if (row.size() > 0) X.push_back(row);
+
+    }
+
+    training_file.close();
+
+    // read test.dat
+
+    std::fstream test_file ("testing.dat", std::ios::in);
+    std::vector<std::vector<int>> X_test;
+    std::vector<int> Y_test;
+
+    while (!test_file.eof()) {
+      std::string line;
+      std::vector<int> row;
+      int count = 0;
+
+      std::getline(test_file, line);
+      
+      for (int i = 0; i < line.size(); i++) {
+          if (count == 10 && (line[i] == '1' || line[i] == '0' || line[i] == '2')) Y_test.push_back(line[i] - '0');
+
+          else {
+            if (line[i] == '1') { row.push_back(1); count++; }
+            else if (line[i] == '0') { row.push_back(0); count++; }
+          }
+      }
+
+       if (row.size() > 0) X_test.push_back(row);
+
+    }
+
+    test_file.close();
+
+    
+    // create model and fit the data
+    DecisionTree tree = DecisionTree(INT_MAX, 5, 0.03, 0.1);
+    tree.fit(X, Y);
+
+    std::vector<int> Y_predict = tree.predict(X_test);
+
+    // print predictions alongside test labels
+    std::cout << "Y  Y_test\n";
+    for (int i = 0; i < Y_predict.size(); i++) {
+      std::cout << Y_predict[i] << "\t" << Y_test[i] << "\n";
+    }
+
+    // calculate accuracy of the model
+    int true_predict = 0;
+    for (int i = 0; i < Y_predict.size(); i++) {
+      if (Y_predict[i] == Y_test[i]) true_predict++;
+    }
+
+    std::cout << "accuracy: " << true_predict/(double)Y_predict.size() << "\n";
 }
