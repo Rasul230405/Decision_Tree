@@ -98,15 +98,6 @@ void LeafNode::set_prediction()
 }
 
 
-RuleNode* to_RuleNode(Node *leafnode, int split_feature)
-{
-
-  RuleNode *rulenode = new RuleNode(split_feature);
-  // handle the deletion in calling function
-  return rulenode;
-}
-
-
 struct CompareLeaf {
   // big information gain is prioritised
   bool operator()(const LeafNode *l1, const LeafNode *l2) {
@@ -289,7 +280,7 @@ void DecisionTree::build_tree(std::vector<DataPoint>& data)
     right->set_info_gain((current_entrp - right_entrp));
 
     // convert the current leaf node to rule node
-    RuleNode *rule_node = to_RuleNode(current_leaf, split_feature);
+    RuleNode *rule_node = new RuleNode(split_feature);
     rule_node->left = left;
     rule_node->right = right;
 
